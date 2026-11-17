@@ -45,3 +45,6 @@ C:\Users\mmart\OneDrive\Escritorio\TestResult\Prueba Tecnica\motor_control_syste
 C:\Users\mmart\OneDrive\Escritorio\TestResult\Prueba Tecnica\motor_control_system_simulation_api\obj\Debug\net11.0\motor_control_system_simulation_api.pdb
 C:\Users\mmart\OneDrive\Escritorio\TestResult\Prueba Tecnica\motor_control_system_simulation_api\obj\Debug\net11.0\motor_control_system_simulation_api.genruntimeconfig.cache
 C:\Users\mmart\OneDrive\Escritorio\TestResult\Prueba Tecnica\motor_control_system_simulation_api\obj\Debug\net11.0\ref\motor_control_system_simulation_api.dll
+C:\Users\mmart\OneDrive\Escritorio\TestResult\Prueba Tecnica\motor_control_system_simulation_api\bin\Debug\net11.0\Swashbuckle.AspNetCore.Swagger.dll
+C:\Users\mmart\OneDrive\Escritorio\TestResult\Prueba Tecnica\motor_control_system_simulation_api\bin\Debug\net11.0\Swashbuckle.AspNetCore.SwaggerGen.dll
+C:\Users\mmart\OneDrive\Escritorio\TestResult\Prueba Tecnica\motor_control_system_simulation_api\bin\Debug\net11.0\Swashbuckle.AspNetCore.SwaggerUI.dll
