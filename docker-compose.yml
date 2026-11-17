@@ -1,0 +1,11 @@
+services:
+  motor-control-api:
+    build:
+      context: motor_control_system_simulation_api
+      dockerfile: Dockerfile
+    container_name: motor-control-api
+    ports:
+      - "5168:5168"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:5168

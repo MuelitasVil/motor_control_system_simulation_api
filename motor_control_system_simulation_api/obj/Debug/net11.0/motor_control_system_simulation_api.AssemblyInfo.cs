@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("motor_control_system_simulation_api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+91b32cf08e5ffc63c641090ef31a298f9413a6f7")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+87846a6f7d19706e0eaf82b023f82b85e80aec13")]
 [assembly: System.Reflection.AssemblyProductAttribute("motor_control_system_simulation_api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("motor_control_system_simulation_api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
