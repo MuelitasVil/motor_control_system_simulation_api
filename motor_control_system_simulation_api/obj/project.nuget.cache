@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "gSIG0/6C0Bw=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\mmart\\OneDrive\\Escritorio\\TestResult\\Prueba Tecnica\\motor_control_system_simulation_api\\motor_control_system_simulation_api.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\mmart\\.nuget\\packages\\microsoft.aspnetcore.openapi\\11.0.0\\microsoft.aspnetcore.openapi.11.0.0.nupkg.sha512",
+    "C:\\Users\\mmart\\.nuget\\packages\\microsoft.openapi\\3.11.0\\microsoft.openapi.3.11.0.nupkg.sha512"
+  ],
+  "logs": []
+}

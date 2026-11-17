@@ -1,0 +1,11 @@
+@motor_control_system_simulation_api_HostAddress = http://localhost:5168
+
+GET {{motor_control_system_simulation_api_HostAddress}}/openapi/v1.json
+Accept: application/json
+
+###
+
+GET {{motor_control_system_simulation_api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
