@@ -103,7 +103,7 @@ cd motor_control_system_simulation_api
 
 ```bash
 dotnet restore
-dotnet run
+dotnet run --project .\motor_control_system_simulation_api\motor_control_system_simulation_api.csproj
 ```
 
 La terminal indicará las direcciones locales donde se inició la aplicación. Con la configuración actual, puedes probar:

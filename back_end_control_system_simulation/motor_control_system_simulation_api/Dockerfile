@@ -10,8 +10,7 @@ RUN dotnet restore "MotorControlSystemSimulation.sln"
 COPY . .
 
 RUN dotnet test "MotorControlSystemSimulation.sln" \
-    --configuration Release \
-    --no-restore
+    --configuration Release
 
 RUN dotnet publish "motor_control_system_simulation_api/motor_control_system_simulation_api.csproj" \
     --configuration Release \
