@@ -1,8 +1,8 @@
 services:
   motor-control-api:
     build:
-      context: motor_control_system_simulation_api
-      dockerfile: Dockerfile
+      context: back_end_control_system_simulation
+      dockerfile: motor_control_system_simulation_api/Dockerfile
     container_name: motor-control-api
     ports:
       - "5168:5168"

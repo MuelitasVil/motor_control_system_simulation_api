@@ -1,12 +1,15 @@
 using Microsoft.AspNetCore.Mvc;
 using MotorControlSystemSimulationApi.Models.Entities;
 using MotorControlSystemSimulationApi.Repositories.Interfaces;
+using MotorControlSystemSimulationApi.Services;
 
 namespace MotorControlSystemSimulationApi.Controllers;
 
 [ApiController]
 [Route("api/vehicles")]
-public sealed class VehicleController(IEntityRepository<Vehicle> repository) : ControllerBase
+public sealed class VehicleController(
+    IEntityRepository<Vehicle> repository,
+    VehicleCreationService creationService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<VehicleResponse>>> GetAll(CancellationToken cancellationToken)
@@ -20,6 +23,23 @@ public sealed class VehicleController(IEntityRepository<Vehicle> repository) : C
     {
         var vehicle = await repository.GetByIdAsync(id, cancellationToken);
         return vehicle is null ? NotFound() : Ok(ToResponse(vehicle));
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<VehicleResponse>> Create(
+        [FromBody] CreateVehicleRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var vehicle = await creationService.CreateAsync(request, cancellationToken);
+            var response = ToResponse(vehicle);
+            return CreatedAtAction(nameof(GetById), new { id = vehicle.VehicleId }, response);
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new ProblemDetails { Title = "Invalid vehicle data", Detail = exception.Message });
+        }
     }
 
     private static VehicleResponse ToResponse(Vehicle vehicle) => new(

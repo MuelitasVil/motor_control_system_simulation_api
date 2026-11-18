@@ -21,6 +21,10 @@ public sealed class MotorSimulationController(MotorSimulationService simulationS
             var result = await simulationService.UpdateSpeedAsync(associatedMotorId, request, cancellationToken);
             return result is null ? NotFound() : Ok(result);
         }
+        catch (MotorNotInTripException exception)
+        {
+            return Conflict(new ProblemDetails { Title = "Motor is not in a trip", Detail = exception.Message });
+        }
         catch (ArgumentOutOfRangeException exception)
         {
             return BadRequest(new ProblemDetails { Title = "Invalid speed command", Detail = exception.Message });
