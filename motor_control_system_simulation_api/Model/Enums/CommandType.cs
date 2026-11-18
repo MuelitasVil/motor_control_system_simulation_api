@@ -4,5 +4,6 @@ public enum CommandType
 {
     IncreaseSpeed,
     DecreaseSpeed,
-    EmergencyStop
+    EmergencyStop,
+    MaintainSpeed
 }
