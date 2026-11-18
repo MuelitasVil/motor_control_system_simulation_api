@@ -1,37 +1,61 @@
 # Motor Control System Simulation API
 
-API REST construida con ASP.NET Core para simular la comunicación con un motor de vehículo eléctrico. El proyecto incluye controladores HTTP, documentación OpenAPI y Swagger UI para explorar y probar los endpoints durante el desarrollo.
+An ASP.NET Core REST API that simulates an electric vehicle motor control system. It provides HTTP endpoints for managing vehicles, motors, motor-vehicle associations, trips, and maintenance. SignalR streams motor telemetry to connected clients while a vehicle is travelling.
 
-La API utiliza repositorios simulados en memoria. Incluye datos iniciales con tres vehículos y tres motores: uno de los motores todavía no está instalado, y un motor instalado está detenido y sin viajes.
+The application uses in-memory repositories with sample data. Data is reset when the API process restarts. The initial data includes three vehicles and three motors; one motor is not installed, one installed motor is stopped and has no trips, and another installed motor already has an active trip.
 
-## Endpoints principales
+## Main features
 
-| Método y ruta | Función |
+- Create and list vehicles and motors.
+- Associate an existing motor with a vehicle.
+- Start trips with or without crew members and finish trips.
+- Change speed only while the associated motor is in a trip.
+- Recharge a vehicle only when it is not travelling.
+- Automatically update travelling motor telemetry every 2.5 seconds and stream it over SignalR.
+
+## Main endpoints
+
+| Method and route | Description |
 |---|---|
-| `GET /api/vehicles` | Lista vehículos. `POST /api/vehicles` crea uno. |
-| `GET /api/motors` | Lista motores. `POST /api/motors` crea uno sin instalarlo. |
-| `GET /api/associated-motors` | Lista instalaciones y su estado (`Stopped` o `InTrip`). `POST /api/associated-motors` relaciona un motor y un vehículo. |
-| `GET /api/trips` | Lista viajes. `POST /api/trips` inicia uno, con `crewMemberIds` opcional o vacío. |
-| `POST /api/trips/{id}/finish` | Finaliza un viaje y deja detenido el motor asociado. |
-| `POST /api/vehicles/{id}/maintenance` | Recarga las baterías del vehículo, solo cuando no está en viaje. |
-| `POST /api/associated-motors/{id}/speed` | Cambia velocidad solo durante un viaje. |
+| `GET /api/vehicles` | List vehicles. |
+| `POST /api/vehicles` | Create a vehicle. |
+| `GET /api/motors` | List motors. |
+| `POST /api/motors` | Create a motor without installing it. |
+| `GET /api/associated-motors` | List motor-vehicle associations and their state (`Stopped` or `InTrip`). |
+| `POST /api/associated-motors` | Associate an existing motor with an existing vehicle. |
+| `GET /api/trips` | List trips. |
+| `POST /api/trips` | Start a trip; `crewMemberIds` is optional. |
+| `POST /api/trips/{id}/finish` | Finish a trip and set the associated motor state to `Stopped`. |
+| `GET /api/crew-members` | List crew members available for trips. |
+| `POST /api/vehicles/{id}/maintenance` | Recharge the vehicle when it is not travelling. |
+| `POST /api/associated-motors/{id}/speed` | Request a speed change during a trip. |
 
-Los cuerpos de los POST son DTOs. Los servicios generan los identificadores y las fechas. Para usar tripulantes existentes, consulta `GET /api/crew-members`.
+POST request bodies use DTOs. Services generate identifiers and timestamps.
 
-El motor asociado `99999999-9999-9999-9999-999999999999` está detenido y no tiene viajes, por lo que sirve para probar la creación de viajes. El motor asociado inicial `33333333-3333-3333-3333-333333333333` ya tiene un viaje en curso.
+## Real-time telemetry
 
-Ejemplo para crear un vehículo (`POST /api/vehicles`):
+The SignalR hub endpoint is `/hubs/motor-telemetry`. A client connects to the hub and invokes `SubscribeToMotor(associatedMotorId)`. The API's `MotorTelemetryWorker` checks travelling motors every 2.5 seconds and asks `MotorSimulationService` to advance each simulation cycle. The service updates the current motor state and stores a history record. The worker then sends the `MotorStateUpdated` event to clients subscribed to that motor.
+
+The automatic simulation increases speed by up to 10 km/h per cycle, subject to the motor's maximum speed and driving mode. If the battery is depleted, speed decreases by 10 km/h per cycle until the motor stops. Automatic telemetry cycles do not create manual command records.
+
+## Sample data for trying trips
+
+The associated motor `99999999-9999-9999-9999-999999999999` is stopped and has no trips; use it to start a test trip. The associated motor `33333333-3333-3333-3333-333333333333` already has a trip in progress.
+
+## Example requests
+
+Create a vehicle (`POST /api/vehicles`):
 
 ```json
 {
   "identifier": "EV-004",
-  "color": "Gris",
+  "color": "Gray",
   "maximumWeight": 1750,
   "maximumOccupants": 5
 }
 ```
 
-Ejemplo para crear un motor sin asociarlo (`POST /api/motors`):
+Create an uninstalled motor (`POST /api/motors`):
 
 ```json
 {
@@ -43,89 +67,102 @@ Ejemplo para crear un motor sin asociarlo (`POST /api/motors`):
 }
 ```
 
-Para instalarlo, envía los identificadores existentes a `POST /api/associated-motors`:
+Associate an existing vehicle and motor (`POST /api/associated-motors`):
 
 ```json
 {
-  "vehicleId": "ID-DEL-VEHICULO",
-  "motorId": "ID-DEL-MOTOR"
+  "vehicleId": "EXISTING-VEHICLE-ID",
+  "motorId": "EXISTING-MOTOR-ID"
 }
 ```
 
-Ejemplo para crear un viaje sin tripulantes:
+Start a trip without crew members (`POST /api/trips`):
 
 ```json
 {
   "associatedMotorId": "99999999-9999-9999-9999-999999999999",
-  "startPoint": "Bogotá",
+  "startPoint": "Bogota",
   "endPoint": "Tunja",
   "totalDistance": 145,
   "cargoWeight": 200
 }
 ```
 
-Este POST cambia el estado de la instalación a `InTrip`. Al finalizar el viaje con `POST /api/trips/{id}/finish`, el estado pasa a `Stopped`.
-
-Para crear un viaje con tripulantes, incluye sus identificadores en el mismo DTO:
+To include crew, add IDs returned by `GET /api/crew-members`:
 
 ```json
 {
   "associatedMotorId": "99999999-9999-9999-9999-999999999999",
-  "startPoint": "Bogotá",
+  "startPoint": "Bogota",
   "endPoint": "Tunja",
   "totalDistance": 145,
   "cargoWeight": 200,
-  "crewMemberIds": ["ID-OBTENIDO-DE-GET-API-CREW-MEMBERS"]
+  "crewMemberIds": ["CREW-MEMBER-ID"]
 }
 ```
 
-Una solicitud de mantenimiento puede indicar el nivel final deseado, entre el nivel actual y 100. Si se omite, se usa 100:
+Maintenance can specify a target battery level from the current level up to 100. If omitted, the service uses 100:
 
 ```json
-{ "targetBatteryLevel": 100 }
+{
+  "targetBatteryLevel": 100
+}
 ```
 
-## Requisitos
+## Requirements
 
 - .NET 11 SDK
-- Git (opcional)
+- Git (optional, for cloning the repository)
 
-## Ejecutar localmente
+## Run locally
 
-Clona el repositorio y entra a la carpeta del proyecto:
+From the repository root, the directory containing `MotorControlSystemSimulation.sln`, restore and run the API:
 
-```bash
-git clone <URL_DEL_REPOSITORIO>
-cd motor_control_system_simulation_api
-```
-
-## Restaura dependencias y ejecuta la API:
-
-```bash
-dotnet restore
+```powershell
+dotnet restore .\MotorControlSystemSimulation.sln
 dotnet run --project .\motor_control_system_simulation_api\motor_control_system_simulation_api.csproj
 ```
 
-La terminal indicará las direcciones locales donde se inició la aplicación. Con la configuración actual, puedes probar:
-- Swagger UI: http://localhost:5168/swagger
-- Documento OpenAPI: http://localhost:5168/openapi/v1.json
+The API uses the local address shown in the terminal. With the current launch settings, the endpoints are:
 
-Usa el puerto que aparezca en la terminal si es diferente de 5168.
+- Swagger UI: <http://localhost:5168/swagger>
+- OpenAPI document: <http://localhost:5168/openapi/v1.json>
 
-Compilar
-```bash
-dotnet build
+Use the port printed in the terminal if it differs from `5168`.
+
+## Run unit tests
+
+From the repository root:
+
+```powershell
+dotnet test .\motor_control_system_simulation_api.Tests\motor_control_system_simulation_api.Tests.csproj
 ```
 
-Desde la carpeta raíz que contiene la solución, ejecutar las pruebas unitarias de `MotorSimulationService`:
+The unit tests focus on `MotorSimulationService` using mocked repositories.
 
-```bash
-dotnet test MotorControlSystemSimulation.sln
+## Run the SignalR integration client
+
+The integration client is a console application. It queries vehicles and associated motors, connects to SignalR, subscribes to a stopped motor, starts a trip, and prints incoming telemetry. Run the API first in one terminal. In a second terminal, from the repository root, run:
+
+```powershell
+dotnet run --project .\motor_control_system_simulation_api.IntegrationTest\motor_control_system_simulation_api.IntegrationTest.csproj -- http://localhost:5168/
 ```
 
-## Tecnologías
+The URL argument is optional; if omitted, the client uses `http://localhost:5168/`. Press `Ctrl+C` to stop the client. It attempts to finish the trip so that the associated motor returns to the `Stopped` state.
+
+## Build the solution
+
+From the repository root:
+
+```powershell
+dotnet build .\MotorControlSystemSimulation.sln
+```
+
+## Technologies
+
 - C#
 - .NET 11
 - ASP.NET Core Web API
-- OpenAPI
-- Swagger UI
+- SignalR
+- OpenAPI and Swagger UI
+- xUnit and Moq
