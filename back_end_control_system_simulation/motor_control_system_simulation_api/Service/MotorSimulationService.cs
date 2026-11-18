@@ -14,17 +14,68 @@ public sealed class MotorSimulationService(
     IEntityRepository<MotorStateHistory> stateHistoryRepository,
     IEntityRepository<Command> commandRepository)
 {
+    public const decimal TelemetryIntervalSeconds = 2.5m;
+
     private const decimal EcoSpeedFactor = 0.60m;
     private const decimal NormalSpeedFactor = 0.80m;
     private const decimal SportSpeedFactor = 1.00m;
     private const decimal ReferenceMaximumRpm = 6000m;
     private const decimal ReferenceOperatingMinutesPerCommand = 1m;
     private const decimal SpeedReductionPerUpdateWhenBatteryEmpty = 10m;
+    private const decimal SpeedIncreasePerUpdate = 10m;
 
     public async Task<MotorStateResponse?> UpdateSpeedAsync(
         Guid associatedMotorId,
         UpdateSpeedRequest request,
         CancellationToken cancellationToken = default)
+    {
+        return await ApplySpeedUpdateAsync(
+            associatedMotorId,
+            request,
+            recordCommand: true,
+            cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Avanza una vez la simulación. El worker llama este método periódicamente;
+    /// no se crea un comando de usuario por cada actualización automática.
+    /// </summary>
+    public async Task<MotorStateResponse?> AdvanceSpeedAsync(
+        Guid associatedMotorId,
+        CancellationToken cancellationToken = default)
+    {
+        var associatedMotor = await associatedMotorRepository.GetByIdAsync(
+            associatedMotorId,
+            cancellationToken);
+
+        if (associatedMotor is null || associatedMotor.OperationState != MotorOperationState.InTrip)
+            return null;
+
+        if (associatedMotor.Motor is null || associatedMotor.Motor.MaximumSpeed <= 0)
+        {
+            throw new InvalidOperationException(
+                "El motor asociado no tiene un motor válido con velocidad máxima configurada.");
+        }
+
+        var speedLimit = CalculateSpeedLimit(associatedMotor.Motor, associatedMotor.DrivingMode);
+        var requestedSpeed = associatedMotor.BatteryLevel <= 0
+            ? associatedMotor.CurrentSpeed
+            : Math.Min(associatedMotor.CurrentSpeed + SpeedIncreasePerUpdate, speedLimit);
+
+        return await ApplySpeedUpdateAsync(
+            associatedMotorId,
+            new UpdateSpeedRequest(requestedSpeed, associatedMotor.DrivingMode),
+            recordCommand: false,
+            cancellationToken: cancellationToken,
+            operatingMinutes: TelemetryIntervalSeconds / 60m);
+    }
+
+    private async Task<MotorStateResponse?> ApplySpeedUpdateAsync(
+        Guid associatedMotorId,
+        UpdateSpeedRequest request,
+        bool recordCommand,
+        CancellationToken cancellationToken,
+        decimal operatingMinutes = ReferenceOperatingMinutesPerCommand)
     {
         ValidateInputSpeed(request);
 
@@ -39,26 +90,30 @@ public sealed class MotorSimulationService(
             associatedMotor,
             request,
             updatedAt,
-            cancellationToken);
+            cancellationToken,
+            operatingMinutes);
 
         var stateHistory = CreateMotorStateHistory(associatedMotor, update, updatedAt);
         await stateHistoryRepository.AddAsync(stateHistory, cancellationToken);
         associatedMotor.StateHistory.Add(stateHistory);
 
-        var commandType = GetCommandType(
-            previousSpeed,
-            update.AppliedSpeed,
-            request.RequestedSpeed);
+        if (recordCommand)
+        {
+            var commandType = GetCommandType(
+                previousSpeed,
+                update.AppliedSpeed,
+                request.RequestedSpeed);
 
-        var command = CreateCommand(
-            associatedMotor,
-            request,
-            update.AppliedSpeed,
-            commandType,
-            updatedAt);
+            var command = CreateCommand(
+                associatedMotor,
+                request,
+                update.AppliedSpeed,
+                commandType,
+                updatedAt);
 
-        await commandRepository.AddAsync(command, cancellationToken);
-        associatedMotor.Commands.Add(command);
+            await commandRepository.AddAsync(command, cancellationToken);
+            associatedMotor.Commands.Add(command);
+        }
 
         return CreateMotorStateResponse(associatedMotor, request, update, updatedAt);
     }
@@ -115,7 +170,8 @@ public sealed class MotorSimulationService(
         MotorAssociated associatedMotor,
         UpdateSpeedRequest request,
         DateTimeOffset updatedAt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        decimal operatingMinutes)
     {
         var motor = associatedMotor.Motor!;
         var speedLimit = CalculateSpeedLimit(motor, request.DrivingMode);
@@ -133,7 +189,8 @@ public sealed class MotorSimulationService(
         var batteryLevel = CalculateBatteryLevel(
             associatedMotor.BatteryLevel,
             motor.BatteryCapacityKwh,
-            power);
+            power,
+            operatingMinutes);
 
         // Si el cálculo de consumo agota la batería en esta actualización, comienza
         // la desaceleración en el mismo ciclo. Las siguientes actualizaciones la llevan a cero.
@@ -210,9 +267,10 @@ public sealed class MotorSimulationService(
     private static decimal CalculateBatteryLevel(
         decimal currentBatteryLevel,
         decimal batteryCapacityKwh,
-        decimal power)
+        decimal power,
+        decimal operatingMinutes)
     {
-        var estimatedEnergyKwh = power * ReferenceOperatingMinutesPerCommand / 60m;
+        var estimatedEnergyKwh = power * operatingMinutes / 60m;
         var batteryUsePercent = batteryCapacityKwh > 0
             ? estimatedEnergyKwh / batteryCapacityKwh * 100m
             : 0m;
