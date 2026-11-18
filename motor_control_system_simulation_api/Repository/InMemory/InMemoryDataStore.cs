@@ -53,7 +53,10 @@ public sealed class InMemoryDataStore
             new() { MotorStateId = Guid.NewGuid(), AssociatedMotorId = AssociatedMotorId, Timestamp = now.AddMinutes(-2), Speed = 35m, Temperature = 68m, Rpm = 1550, Power = 42.78m, BatteryLevel = 86m },
             new() { MotorStateId = Guid.NewGuid(), AssociatedMotorId = AssociatedMotorId, Timestamp = now.AddMinutes(-1), Speed = 40m, Temperature = 70m, Rpm = 1777, Power = 48.89m, BatteryLevel = 85.5m }
         });
-        associated.StateHistory.AddRange(MotorStateHistory);
+        foreach (var state in MotorStateHistory)
+        {
+            associated.StateHistory.Add(state);
+        }
 
         Commands.Add(new Command
         {

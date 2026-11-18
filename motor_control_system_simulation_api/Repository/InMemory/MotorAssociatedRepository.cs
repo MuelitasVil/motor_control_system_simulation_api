@@ -10,3 +10,4 @@ public sealed class MotorAssociatedRepository : InMemoryRepositoryBase<MotorAsso
     {
     }
 }
+
