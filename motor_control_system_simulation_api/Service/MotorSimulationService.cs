@@ -5,8 +5,8 @@ using MotorControlSystemSimulationApi.Repositories.Interfaces;
 namespace MotorControlSystemSimulationApi.Services;
 
 /// <summary>
-/// Caso de uso que aplica una orden de velocidad y guarda el nuevo estado,
-/// una muestra de telemetría y el comando procesado.
+/// Procesa órdenes de velocidad, actualiza el estado del motor asociado y
+/// registra tanto la telemetría como el comando recibido.
 /// Las ecuaciones de telemetría son heurísticas de simulación, no un modelo físico.
 /// </summary>
 public sealed class MotorSimulationService(
@@ -25,34 +25,105 @@ public sealed class MotorSimulationService(
         UpdateSpeedRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        if (request.RequestedSpeed < 0)
-            throw new ArgumentOutOfRangeException(nameof(request), "La velocidad solicitada no puede ser negativa.");
-        if (!Enum.IsDefined(request.DrivingMode))
-            throw new ArgumentOutOfRangeException(nameof(request), "El modo de conducción no es válido.");
+        ValidateInputSpeed(request);
 
-        var associatedMotor = await associatedMotorRepository.GetByIdAsync(associatedMotorId, cancellationToken);
+        var associatedMotor = await GetAssociatedMotorAsync(associatedMotorId, cancellationToken);
         if (associatedMotor is null)
             return null;
-        if (associatedMotor.Motor is null || associatedMotor.Motor.MaximumSpeed <= 0)
-            throw new InvalidOperationException("El motor asociado no tiene un motor válido con velocidad máxima configurada.");
 
-        var motor = associatedMotor.Motor;
         var previousSpeed = associatedMotor.CurrentSpeed;
-        var speedLimit = Math.Min(motor.MaximumSpeed, motor.MaximumSpeed * GetModeFactor(request.DrivingMode));
-        var appliedSpeed = Math.Min(request.RequestedSpeed, speedLimit);
-        var powerRatio = appliedSpeed / motor.MaximumSpeed;
-        var rpm = (int)Math.Round(ReferenceMaximumRpm * powerRatio, MidpointRounding.AwayFromZero);
-        var power = Math.Round(motor.MaximumPower * powerRatio, 2, MidpointRounding.AwayFromZero);
-        var temperature = Math.Min(
+        var updatedAt = DateTimeOffset.UtcNow;
+
+        var update = await UpdateAssociateMotorAsync(
+            associatedMotor,
+            request,
+            updatedAt,
+            cancellationToken);
+
+        var stateHistory = CreateMotorStateHistory(associatedMotor, update, updatedAt);
+        await stateHistoryRepository.AddAsync(stateHistory, cancellationToken);
+        associatedMotor.StateHistory.Add(stateHistory);
+
+        var commandType = GetCommandType(
+            previousSpeed,
+            update.AppliedSpeed,
+            request.RequestedSpeed);
+
+        var command = CreateCommand(
+            associatedMotor,
+            request,
+            update.AppliedSpeed,
+            commandType,
+            updatedAt);
+
+        await commandRepository.AddAsync(command, cancellationToken);
+        associatedMotor.Commands.Add(command);
+
+        return CreateMotorStateResponse(associatedMotor, request, update, updatedAt);
+    }
+
+    /// <summary>Valida la solicitud y lanza una excepción si los datos no son válidos.</summary>
+    private static void ValidateInputSpeed(UpdateSpeedRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.RequestedSpeed < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                "La velocidad solicitada no puede ser negativa.");
+        }
+
+        if (!Enum.IsDefined(request.DrivingMode))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                "El modo de conducción no es válido.");
+        }
+    }
+
+    /// <summary>Busca el motor asociado y valida que tenga una configuración de motor utilizable.</summary>
+    private async Task<MotorAssociated?> GetAssociatedMotorAsync(
+        Guid associatedMotorId,
+        CancellationToken cancellationToken)
+    {
+        var associatedMotor = await associatedMotorRepository.GetByIdAsync(
+            associatedMotorId,
+            cancellationToken);
+
+        if (associatedMotor is null)
+            return null;
+
+        if (associatedMotor.Motor is null || associatedMotor.Motor.MaximumSpeed <= 0)
+        {
+            throw new InvalidOperationException(
+                "El motor asociado no tiene un motor válido con velocidad máxima configurada.");
+        }
+
+        return associatedMotor;
+    }
+
+    /// <summary>Calcula los valores del estado y persiste los cambios en el motor asociado.</summary>
+    private async Task<MotorUpdateValues> UpdateAssociateMotorAsync(
+        MotorAssociated associatedMotor,
+        UpdateSpeedRequest request,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        var motor = associatedMotor.Motor!;
+        var speedLimit = CalculateSpeedLimit(motor, request.DrivingMode);
+        var appliedSpeed = CalculateAppliedSpeed(request.RequestedSpeed, speedLimit);
+        var speedRatio = CalculateSpeedRatio(appliedSpeed, motor.MaximumSpeed);
+        var rpm = CalculateRpm(speedRatio);
+        var power = CalculatePower(motor, speedRatio);
+        var temperature = CalculateTemperature(
+            associatedMotor.CurrentTemperature,
             motor.MaximumTemperature,
-            Math.Round(associatedMotor.CurrentTemperature + powerRatio, 2, MidpointRounding.AwayFromZero));
-        var estimatedEnergyKwh = power * ReferenceOperatingMinutesPerCommand / 60m;
-        var batteryUsePercent = motor.BatteryCapacityKwh > 0
-            ? estimatedEnergyKwh / motor.BatteryCapacityKwh * 100m
-            : 0m;
-        var batteryLevel = Math.Max(0m, Math.Round(associatedMotor.BatteryLevel - batteryUsePercent, 2, MidpointRounding.AwayFromZero));
-        var now = DateTimeOffset.UtcNow;
+            speedRatio);
+        var batteryLevel = CalculateBatteryLevel(
+            associatedMotor.BatteryLevel,
+            motor.BatteryCapacityKwh,
+            power);
 
         associatedMotor.CurrentSpeed = appliedSpeed;
         associatedMotor.CurrentTemperature = temperature;
@@ -60,54 +131,140 @@ public sealed class MotorSimulationService(
         associatedMotor.CurrentPower = power;
         associatedMotor.BatteryLevel = batteryLevel;
         associatedMotor.DrivingMode = request.DrivingMode;
+
         await associatedMotorRepository.UpdateAsync(associatedMotor, cancellationToken);
 
-        var state = new MotorStateHistory
-        {
-            MotorStateId = Guid.NewGuid(),
-            AssociatedMotorId = associatedMotor.AssociatedMotorId,
-            Timestamp = now.UtcDateTime,
-            Speed = appliedSpeed,
-            Temperature = temperature,
-            Rpm = rpm,
-            Power = power,
-            BatteryLevel = batteryLevel
-        };
-        await stateHistoryRepository.AddAsync(state, cancellationToken);
-        associatedMotor.StateHistory.Add(state);
-
-        var commandType = appliedSpeed > previousSpeed
-            ? CommandType.IncreaseSpeed
-            : appliedSpeed < previousSpeed
-                ? CommandType.DecreaseSpeed
-                : request.RequestedSpeed == 0 ? CommandType.EmergencyStop : CommandType.MaintainSpeed;
-        var command = new Command
-        {
-            AssociatedMotorId = associatedMotor.AssociatedMotorId,
-            AssociatedMotor = associatedMotor,
-            Type = commandType,
-            Parameters = $"requestedSpeed={request.RequestedSpeed};appliedSpeed={appliedSpeed};mode={request.DrivingMode}",
-            Result = request.RequestedSpeed == appliedSpeed
-                ? "Command processed."
-                : $"Speed capped at {appliedSpeed} km/h for the selected driving mode.",
-            SentAt = now,
-            ProcessedAt = now
-        };
-        await commandRepository.AddAsync(command, cancellationToken);
-        associatedMotor.Commands.Add(command);
-
-        return new MotorStateResponse(
-            associatedMotor.AssociatedMotorId,
-            request.RequestedSpeed,
-            appliedSpeed,
+        return new MotorUpdateValues(
             speedLimit,
+            appliedSpeed,
             temperature,
             rpm,
             power,
-            batteryLevel,
-            request.DrivingMode,
-            now);
+            batteryLevel);
     }
+
+    private static decimal CalculateSpeedLimit(Motor motor, DrivingMode drivingMode)
+    {
+        var modeSpeedLimit = motor.MaximumSpeed * GetModeFactor(drivingMode);
+        return Math.Min(motor.MaximumSpeed, modeSpeedLimit);
+    }
+
+    private static decimal CalculateAppliedSpeed(decimal requestedSpeed, decimal speedLimit) =>
+        Math.Min(requestedSpeed, speedLimit);
+
+    private static decimal CalculateSpeedRatio(decimal appliedSpeed, decimal maximumSpeed) =>
+        appliedSpeed / maximumSpeed;
+
+    private static int CalculateRpm(decimal speedRatio) =>
+        (int)Math.Round(
+            ReferenceMaximumRpm * speedRatio,
+            MidpointRounding.AwayFromZero);
+
+    private static decimal CalculatePower(Motor motor, decimal speedRatio) =>
+        Math.Round(
+            motor.MaximumPower * speedRatio,
+            2,
+            MidpointRounding.AwayFromZero);
+
+    private static decimal CalculateTemperature(
+        decimal currentTemperature,
+        decimal maximumTemperature,
+        decimal speedRatio)
+    {
+        var estimatedTemperature = Math.Round(
+            currentTemperature + speedRatio,
+            2,
+            MidpointRounding.AwayFromZero);
+
+        return Math.Min(maximumTemperature, estimatedTemperature);
+    }
+
+    private static decimal CalculateBatteryLevel(
+        decimal currentBatteryLevel,
+        decimal batteryCapacityKwh,
+        decimal power)
+    {
+        var estimatedEnergyKwh = power * ReferenceOperatingMinutesPerCommand / 60m;
+        var batteryUsePercent = batteryCapacityKwh > 0
+            ? estimatedEnergyKwh / batteryCapacityKwh * 100m
+            : 0m;
+
+        return Math.Max(
+            0m,
+            Math.Round(
+                currentBatteryLevel - batteryUsePercent,
+                2,
+                MidpointRounding.AwayFromZero));
+    }
+
+    /// <summary>Crea una nueva muestra de telemetría a partir de los valores calculados.</summary>
+    private static MotorStateHistory CreateMotorStateHistory(
+        MotorAssociated associatedMotor,
+        MotorUpdateValues update,
+        DateTimeOffset timestamp) => new()
+    {
+        MotorStateId = Guid.NewGuid(),
+        AssociatedMotorId = associatedMotor.AssociatedMotorId,
+        Timestamp = timestamp.UtcDateTime,
+        Speed = update.AppliedSpeed,
+        Temperature = update.Temperature,
+        Rpm = update.Rpm,
+        Power = update.Power,
+        BatteryLevel = update.BatteryLevel
+    };
+
+    /// <summary>Determina el tipo de comando comparando la velocidad anterior con la aplicada.</summary>
+    private static CommandType GetCommandType(
+        decimal previousSpeed,
+        decimal appliedSpeed,
+        decimal requestedSpeed)
+    {
+        if (requestedSpeed == 0)
+            return CommandType.EmergencyStop;
+
+        if (appliedSpeed > previousSpeed)
+            return CommandType.IncreaseSpeed;
+
+        if (appliedSpeed < previousSpeed)
+            return CommandType.DecreaseSpeed;
+
+        return CommandType.MaintainSpeed;
+    }
+
+    /// <summary>Crea el comando que se almacenará como resultado de la solicitud.</summary>
+    private static Command CreateCommand(
+        MotorAssociated associatedMotor,
+        UpdateSpeedRequest request,
+        decimal appliedSpeed,
+        CommandType commandType,
+        DateTimeOffset timestamp) => new()
+    {
+        AssociatedMotorId = associatedMotor.AssociatedMotorId,
+        AssociatedMotor = associatedMotor,
+        Type = commandType,
+        Parameters = $"requestedSpeed={request.RequestedSpeed};appliedSpeed={appliedSpeed};mode={request.DrivingMode}",
+        Result = request.RequestedSpeed == appliedSpeed
+            ? "Command processed."
+            : $"Speed capped at {appliedSpeed} km/h for the selected driving mode.",
+        SentAt = timestamp,
+        ProcessedAt = timestamp
+    };
+
+    private static MotorStateResponse CreateMotorStateResponse(
+        MotorAssociated associatedMotor,
+        UpdateSpeedRequest request,
+        MotorUpdateValues update,
+        DateTimeOffset updatedAt) => new(
+            associatedMotor.AssociatedMotorId,
+            request.RequestedSpeed,
+            update.AppliedSpeed,
+            update.SpeedLimit,
+            update.Temperature,
+            update.Rpm,
+            update.Power,
+            update.BatteryLevel,
+            request.DrivingMode,
+            updatedAt);
 
     private static decimal GetModeFactor(DrivingMode mode) => mode switch
     {
@@ -116,4 +273,12 @@ public sealed class MotorSimulationService(
         DrivingMode.Sport => SportSpeedFactor,
         _ => throw new ArgumentOutOfRangeException(nameof(mode))
     };
+
+    private sealed record MotorUpdateValues(
+        decimal SpeedLimit,
+        decimal AppliedSpeed,
+        decimal Temperature,
+        int Rpm,
+        decimal Power,
+        decimal BatteryLevel);
 }
