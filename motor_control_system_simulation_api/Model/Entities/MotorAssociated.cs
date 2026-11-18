@@ -16,6 +16,7 @@ public class MotorAssociated
 
     public DateTimeOffset InstallationDate { get; set; }
     public string OperatingStatus { get; set; } = "Active";
+    public MotorOperationState OperationState { get; set; } = MotorOperationState.Stopped;
 
     // Estado actual de esta instalación de motor
     public decimal CurrentSpeed { get; set; }

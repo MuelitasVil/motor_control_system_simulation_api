@@ -19,6 +19,7 @@ public sealed class MotorSimulationService(
     private const decimal SportSpeedFactor = 1.00m;
     private const decimal ReferenceMaximumRpm = 6000m;
     private const decimal ReferenceOperatingMinutesPerCommand = 1m;
+    private const decimal SpeedReductionPerUpdateWhenBatteryEmpty = 10m;
 
     public async Task<MotorStateResponse?> UpdateSpeedAsync(
         Guid associatedMotorId,
@@ -100,6 +101,12 @@ public sealed class MotorSimulationService(
                 "El motor asociado no tiene un motor válido con velocidad máxima configurada.");
         }
 
+        if (associatedMotor.OperationState != MotorOperationState.InTrip)
+        {
+            throw new MotorNotInTripException(
+                "La velocidad solo se puede modificar cuando el motor asociado está en un viaje.");
+        }
+
         return associatedMotor;
     }
 
@@ -112,7 +119,10 @@ public sealed class MotorSimulationService(
     {
         var motor = associatedMotor.Motor!;
         var speedLimit = CalculateSpeedLimit(motor, request.DrivingMode);
-        var appliedSpeed = CalculateAppliedSpeed(request.RequestedSpeed, speedLimit);
+        var appliedSpeed = associatedMotor.BatteryLevel <= 0
+            ? CalculateBatteryDepletionSpeed(associatedMotor.CurrentSpeed)
+            : CalculateAppliedSpeed(request.RequestedSpeed, speedLimit);
+
         var speedRatio = CalculateSpeedRatio(appliedSpeed, motor.MaximumSpeed);
         var rpm = CalculateRpm(speedRatio);
         var power = CalculatePower(motor, speedRatio);
@@ -124,6 +134,21 @@ public sealed class MotorSimulationService(
             associatedMotor.BatteryLevel,
             motor.BatteryCapacityKwh,
             power);
+
+        // Si el cálculo de consumo agota la batería en esta actualización, comienza
+        // la desaceleración en el mismo ciclo. Las siguientes actualizaciones la llevan a cero.
+        if (batteryLevel <= 0 && associatedMotor.BatteryLevel > 0 && appliedSpeed > 0)
+        {
+            appliedSpeed = CalculateBatteryDepletionSpeed(associatedMotor.CurrentSpeed);
+            speedRatio = CalculateSpeedRatio(appliedSpeed, motor.MaximumSpeed);
+            rpm = CalculateRpm(speedRatio);
+            power = CalculatePower(motor, speedRatio);
+            temperature = CalculateTemperature(
+                associatedMotor.CurrentTemperature,
+                motor.MaximumTemperature,
+                speedRatio);
+            batteryLevel = 0;
+        }
 
         associatedMotor.CurrentSpeed = appliedSpeed;
         associatedMotor.CurrentTemperature = temperature;
@@ -151,6 +176,9 @@ public sealed class MotorSimulationService(
 
     private static decimal CalculateAppliedSpeed(decimal requestedSpeed, decimal speedLimit) =>
         Math.Min(requestedSpeed, speedLimit);
+
+    private static decimal CalculateBatteryDepletionSpeed(decimal currentSpeed) =>
+        Math.Max(0m, currentSpeed - SpeedReductionPerUpdateWhenBatteryEmpty);
 
     private static decimal CalculateSpeedRatio(decimal appliedSpeed, decimal maximumSpeed) =>
         appliedSpeed / maximumSpeed;
@@ -243,9 +271,11 @@ public sealed class MotorSimulationService(
         AssociatedMotor = associatedMotor,
         Type = commandType,
         Parameters = $"requestedSpeed={request.RequestedSpeed};appliedSpeed={appliedSpeed};mode={request.DrivingMode}",
-        Result = request.RequestedSpeed == appliedSpeed
-            ? "Command processed."
-            : $"Speed capped at {appliedSpeed} km/h for the selected driving mode.",
+        Result = associatedMotor.BatteryLevel <= 0
+            ? $"Battery empty; speed reduced automatically to {appliedSpeed} km/h."
+            : request.RequestedSpeed == appliedSpeed
+                ? "Command processed."
+                : $"Speed capped at {appliedSpeed} km/h for the selected driving mode.",
         SentAt = timestamp,
         ProcessedAt = timestamp
     };
@@ -281,4 +311,8 @@ public sealed class MotorSimulationService(
         int Rpm,
         decimal Power,
         decimal BatteryLevel);
+}
+
+public sealed class MotorNotInTripException(string message) : InvalidOperationException(message)
+{
 }
