@@ -1,7 +1,7 @@
 services:
   motor-control-api:
     build:
-      context: back_end_control_system_simulation
+      context: ./back_end_control_system_simulation
       dockerfile: motor_control_system_simulation_api/Dockerfile
     container_name: motor-control-api
     ports:
@@ -9,3 +9,13 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:5168
+
+  motor-control-frontend:
+    build:
+      context: ./front_end/motor_control_system
+      dockerfile: Dockerfile
+    container_name: motor-control-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - motor-control-api
