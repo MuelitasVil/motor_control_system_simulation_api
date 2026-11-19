@@ -1,5 +1,3 @@
-const apiBaseUrl = 'http://localhost:5168/api'
-
 export const env = {
-  apiBaseUrl: apiBaseUrl.replace(/\/$/, ''),
+  apiBaseUrl: (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, ''),
 } as const

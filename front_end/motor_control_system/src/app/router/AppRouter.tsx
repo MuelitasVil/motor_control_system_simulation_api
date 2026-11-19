@@ -1,5 +1,5 @@
-import { GreetingDashboard } from '../../modules/greetings/pages/GreetingDashboard'
+import { FleetDashboard } from '../../modules/dashboard/pages/FleetDashboard'
 
 export function AppRouter() {
-  return <GreetingDashboard />
+  return <FleetDashboard />
 }

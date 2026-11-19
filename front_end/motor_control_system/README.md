@@ -1,32 +1,32 @@
-# React + TypeScript + Vite
+# Motor Control Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Single-page React dashboard for the Motor Control System Simulation API. Lists vehicles and motors, creates and finishes trips, sends speed and driving mode commands, recharges parked vehicles and displays live telemetry.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Start the ASP.NET Core API on HTTP port 5168.
+2. Extract this archive into `front_end/motor_control_system` and run from that folder:
 
-## React Compiler
+   ```sh
+   npm ci
+   npm run dev
+   ```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+3. Open http://localhost:5173. Vite proxies `/api` and `/hubs` to the API configured in `.env.local`.
 
-## Expanding the Oxlint configuration
+## Run with Docker Compose
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+Use this folder as the frontend service build context and publish container port 5173. The frontend Dockerfile starts Vite in `docker` mode. The included `.env.docker` proxies to `http://motor-control-api:5168`, so the backend service must have that name or alias and share the Compose network. From the repository root, use `docker compose up --build`.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+If your Compose file already mounts a persistent volume at `/app/node_modules`, update its dependencies after replacing the frontend:
+
+```sh
+docker compose run --rm --no-deps motor-control-frontend npm ci
+docker compose up --build
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Simulation behavior
+
+Both driving controls use `POST /api/associated-motors/{id}/speed`. Changing the mode sends the last displayed speed with the selected mode. The backend can cap that speed and continues to advance the simulation on its own every 2.5 seconds. The current backend does not store a persistent target speed for these commands.
+
+The dashboard subscribes to `MotorStateUpdated` for associated motors on active trips. The fleet list refreshes after successful actions and periodically to pick up trips changed elsewhere.
