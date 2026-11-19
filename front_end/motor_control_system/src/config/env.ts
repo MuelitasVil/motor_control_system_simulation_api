@@ -1,4 +1,4 @@
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5168'
+const apiBaseUrl = 'http://localhost:5168/api'
 
 export const env = {
   apiBaseUrl: apiBaseUrl.replace(/\/$/, ''),
